@@ -29,6 +29,7 @@ import torch
 import torch.nn as nn
 from torch.backends import cudnn
 
+from efficientdet.model import FilterDetections
 from backbone import EfficientPoseBackbone
 from efficientdet.utils import BBoxTransform, ClipBoxes
 from utils.utils import STANDARD_COLORS, standard_to_bgr, get_index_label, plot_one_box,postprocess_det
@@ -46,14 +47,14 @@ anchor_scales = [2**0, 2**(1.0/3.0), 2**(2.0/3.0)]
 score_threshold = 0.5
 iou_threshold = 0.2
 
-use_cuda = True #False #
+use_cuda = False #True #False #
 use_float16 = False
 cudnn.fastest = True  # type: ignore
 cudnn.benchmark = True # type: ignore
 
 class ModelWithFilterDet(nn.Module):
     def __init__(self, model):
-        super(ModelWithFilterDet, self).__init__()
+        super().__init__()
         self.model = model
         self.filter_det = FilterDetections(            
                                 num_rotation_parameters = 3,
@@ -66,16 +67,17 @@ class ModelWithFilterDet(nn.Module):
 
     def forward(self, inputs):
         features, regression, classification, translation, rotation, anchors = self.model(inputs)
-        regression, classification, translation, rotation = self.filter_det(regression, classification, translation, rotation)
+        regression, classification, translation, rotation = self.filter_det([regression, classification, translation, rotation])
         return features, regression, classification, translation, rotation, anchors
 
 def main():
     #input parameter
     path_to_images = "../datasets/Linemod_preprocessed/data/08/rgb/"
     image_extension = ".png"
+    #path_to_weights = f'weights/trained/efficientpose-d{compound_coef}_linemod_obj8_one_last_train.pth'
     path_to_weights = f'weights/trained/efficientpose-d{compound_coef}_linemod_obj8_one_last_train.pth'
     batch_size = 2
-    save_path = "./predictions" #where to save the images or None if the images should be displayed and not saved
+    save_path = "./predictions/linemod" #where to save the images or None if the images should be displayed and not saved
     #class_to_name = {0: "ape", 1: "can", 2: "cat", 3: "driller", 4: "duck", 5: "eggbox", 6: "glue", 7: "holepuncher"} #Occlusion
     class_to_name = {0: "driller"} #Linemod use a single class with a name of the Linemod objects
     
@@ -110,7 +112,7 @@ def main():
     # del temp_weight['classifier.header.pointwise_conv.conv.bias']
     model.load_state_dict(temp_weight, strict = False) # 类别数变了 删掉这部分权重再load
  
-    model = ModelWithFilterDet(model)
+    #model = ModelWithFilterDet(model)
 
     model.requires_grad_(False)
     model.eval()
@@ -138,6 +140,7 @@ def main():
             
             #preprocessing
             image_size = model.input_sizes[compound_coef] # type: ignore
+            # image_size = model.model.input_sizes[compound_coef] # type: ignore
             input_list, scale = preprocess_pose(image, image_size, camera_matrix, translation_scale_norm)
 
             input_batch_list[0].append(input_list[0]) # img_batch_list
@@ -167,7 +170,7 @@ def main():
             #print("after inference")
             regressBoxes = BBoxTransform()
             clipBoxes = ClipBoxes()
-
+            
             out_dict = postprocess_pose(input_img_batch,
                                        anchors, 
                                        regression, 
@@ -179,7 +182,7 @@ def main():
                                        scale_batch_list,
                                        score_threshold, 
                                        iou_threshold)
-                
+               
             for idx_j in range(idx_i, idx_i+batch_size) :
                 org_image = cv2.imread(img_org_path_list[idx_j])
                 draw_detections(org_image,
@@ -193,7 +196,30 @@ def main():
                                 label_to_name = class_to_name,
                                 draw_bbox_2d = draw_bbox_2d,
                                 draw_name = draw_name)
-                
+
+            # for idx_j in range(idx_i, idx_i+batch_size) :
+            #     #postprocessing
+            #     boxes, scores, labels, rotations, translations = postprocess_pose(
+            #         boxes = regression[idx_j-idx_i, :, :4], 
+            #         scores = regression[idx_j-idx_i, :,4], 
+            #         labels = classification[idx_j-idx_i, :, :],
+            #         rotations = rotation[idx_j-idx_i, :, :], 
+            #         translations = translation[idx_j-idx_i, :, :], 
+            #         scale = scale_batch_list[idx_j], 
+            #         score_threshold = score_threshold)
+            #     org_image = cv2.imread(img_org_path_list[idx_j])
+            #     draw_detections(org_image,
+            #                     boxes,
+            #                     scores,
+            #                     labels,
+            #                     rotations,
+            #                     translations,
+            #                     class_to_bbox_3D = class_to_3d_bboxes,
+            #                     camera_matrix = camera_matrix,
+            #                     label_to_name = class_to_name,
+            #                     draw_bbox_2d = draw_bbox_2d,
+            #                     draw_name = draw_name)            
+
                 if save_path is None:
                     #display image with predictions
                     cv2.imshow('image with predictions', org_image)

@@ -41,10 +41,12 @@ import argparse
 import os
 import sys
 
-import tensorflow as tf
+#import tensorflow as tf
+import torch
+import torch.nn as nn
 
-from model import build_EfficientPose
-from eval.common import evaluate
+from backbone import EfficientPoseBackbone
+from eval.common import evaluate #type:ignore
 
 
 def parse_args(args):
@@ -55,22 +57,45 @@ def parse_args(args):
     subparsers = parser.add_subparsers(help = 'Arguments for specific dataset types.', dest='dataset_type')
     subparsers.required = True
     
-    linemod_parser = subparsers.add_parser('linemod')
-    linemod_parser.add_argument('linemod_path', help = 'Path to dataset directory (ie. /Datasets/Linemod_preprocessed).')
-    linemod_parser.add_argument('--object-id', help = 'ID of the Linemod Object to train on', type = int, default = 8)
+    parser.add_argument('--dataset_type', 
+                        default = 'linemod', 
+                        help = 'Arguments for specific dataset types.')        
+    parser.add_argument('--linemod_path', 
+                        default='../datasets/Linemod_preprocessed', 
+                        help = 'Path to dataset dir (ie. /Datasets/Linemod_preprocessed).')
+    parser.add_argument('--object-id', 
+                        type = int, default = 8, 
+                        help = 'ID of the Linemod Object to train on')    
+    # linemod_parser = subparsers.add_parser('linemod')
+    # linemod_parser.add_argument('linemod_path', help = 'Path to dataset directory (ie. /Datasets/Linemod_preprocessed).')
+    # linemod_parser.add_argument('--object-id', help = 'ID of the Linemod Object to train on', type = int, default = 8)
     
-    occlusion_parser = subparsers.add_parser('occlusion')
-    occlusion_parser.add_argument('occlusion_path', help = 'Path to dataset directory (ie. /Datasets/Linemod_preprocessed).')
+    # occlusion_parser = subparsers.add_parser('occlusion')
+    # occlusion_parser.add_argument('occlusion_path', help = 'Path to dataset directory (ie. /Datasets/Linemod_preprocessed).')
 
-    parser.add_argument('--rotation-representation', help = 'Which representation of the rotation should be used. Choose from "axis_angle", "rotation_matrix" and "quaternion"', default = 'axis_angle')
+    parser.add_argument('--rotation-representation', 
+                        help = 'Which representation of the rotation should be used. Choose from "axis_angle", "rotation_matrix" and "quaternion"', 
+                        default = 'axis_angle')
 
-    parser.add_argument('--weights', help = 'File containing weights to init the model parameter')
+    parser.add_argument('--weights', 
+                        default='./weights/trained/efficientpose-d0_linemod_obj8_last.pth',
+                        help = 'File containing weights to init the model parameter')
 
-    parser.add_argument('--batch-size', help = 'Size of the batches.', default = 1, type = int)
-    parser.add_argument('--phi', help = 'Hyper parameter phi', default = 0, type = int, choices = (0, 1, 2, 3, 4, 5, 6))
-    parser.add_argument('--gpu', help = 'Id of the GPU to use (as reported by nvidia-smi).')
-    parser.add_argument('--score-threshold', help = 'score threshold for non max suppresion', type = float, default = 0.5)
-    parser.add_argument('--validation-image-save-path', help = 'path where to save the predicted validation images after each epoch', default = None)
+    parser.add_argument('--batch-size', 
+                        help = 'Size of the batches.', 
+                        default = 1, type = int)
+    parser.add_argument('--phi', 
+                        help = 'Hyper parameter phi', 
+                        default = 0, type = int, choices = (0, 1, 2, 3, 4, 5, 6))
+    parser.add_argument('--gpu', 
+                        help = 'Id of the GPU to use (as reported by nvidia-smi).',
+                        default = [0,])
+    parser.add_argument('--score-threshold', 
+                        help = 'score threshold for non max suppresion', 
+                        type = float, default = 0.5)
+    parser.add_argument('--validation-image-save-path', 
+                        help = 'path where to save the predicted validation images after each epoch', 
+                        default = './test_output/')
     
     print(vars(parser.parse_args(args)))
     return parser.parse_args(args)
@@ -83,8 +108,6 @@ def main(args=None):
     Args:
         args: parseargs object containing configuration for the evaluation procedure.
     """
-    
-    allow_gpu_growth_memory()
     
     # parse arguments
     if args is None:
@@ -108,31 +131,19 @@ def main(args=None):
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
     print("\nBuilding the Model...")
-    _, prediction_model, _ = build_EfficientPose(args.phi,
-                                                 num_classes = num_classes,
-                                                 num_anchors = num_anchors,
-                                                 freeze_bn = True,
-                                                 score_threshold = args.score_threshold,
-                                                 num_rotation_parameters = num_rotation_parameters,
-                                                 print_architecture = False)
+    prediction_model = EfficientPoseBackbone(compound_coef = args.phi,
+                                             num_classes = num_classes,
+                                             num_anchors = num_anchors,
+                                             freeze_bn = True,
+                                             score_threshold = args.score_threshold,
+                                             num_rotation_parameters = num_rotation_parameters)
     print("Done!")
     # load pretrained weights
     print('Loading model, this may take a second...')
-    prediction_model.load_weights(args.weights, by_name = True)
+    prediction_model.load_weights(args.weights, by_name = True) # type: ignore
     print("\nDone!")
     
     evaluate_model(prediction_model, generator, args.validation_image_save_path, args.score_threshold)
-    
-    
-def allow_gpu_growth_memory():
-    """
-        Set allow growth GPU memory to true
-
-    """
-    config = tf.ConfigProto()
-    config.gpu_options.allow_growth = True
-    _ = tf.Session(config = config)
-    
     
 def create_generators(args):
     """

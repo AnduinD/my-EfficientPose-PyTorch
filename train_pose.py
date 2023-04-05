@@ -52,7 +52,7 @@ def parse_args(args):
                         help = 'Which representation of the rotation should be used. Choose from "axis_angle", "rotation_matrix" and "quaternion"')    
 
     parser.add_argument('--weights',
-                        default='./weights/trained/efficientpose-d0_linemod_obj8_last.pth', 
+                        default='./weights/trained/efficientpose-d0_linemod_obj8_one_last_train.pth', 
                         help = 'File containing weights to init the model parameter')
     parser.add_argument('--freeze-backbone', 
                         help = 'Freeze training of backbone layers.', 
@@ -63,10 +63,10 @@ def parse_args(args):
 
     parser.add_argument('--batch-size',
                         help = 'Size of the batches.',
-                        default = 8, type = int)
+                        default = 1, type = int)
     parser.add_argument('--lr', 
                         help = 'Learning rate',
-                        default = 1e-2, type = float)
+                        default = 1e-4, type = float)
     parser.add_argument('--no-color-augmentation', 
                         help = 'Do not use colorspace augmentation', 
                         action = 'store_true')
@@ -117,10 +117,10 @@ def parse_args(args):
                         default=10, type=int)
     parser.add_argument('--save_interval',
                         help='interval for saving model',
-                        default=50, type=int)
+                        default=1000, type=int)
     parser.add_argument('--val_interval',
                         help='interval for validation',
-                        default=2, type=int)
+                        default = 10, type=int)
 
     # # Fit generator arguments
     # parser.add_argument('--multiprocessing', 
@@ -211,12 +211,12 @@ def main(args = None):
     print("\nBuilding the Model...")
 
     #build model and load weights
-    model = EfficientPoseBackbone( compound_coef=args.phi, 
-                                    num_classes=num_classes,
-                                    num_anchors=num_anchors,
-                                    freeze_bn=not args.no_freeze_bn,
-                                    score_threshold = args.score_threshold,
-                                    num_rotation_parameters = num_rotation_parameters)
+    model = EfficientPoseBackbone(compound_coef=args.phi, 
+                                  num_classes=num_classes,
+                                  num_anchors=num_anchors,
+                                  freeze_bn=not args.no_freeze_bn,
+                                  #score_threshold = args.score_threshold,
+                                  num_rotation_parameters = num_rotation_parameters)
 
     print("Done!")
     # load pretrained weights
@@ -275,8 +275,8 @@ def main(args = None):
             if use_sync_bn:
                 patch_replication_callback(model)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)#, momentum=0.9)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, verbose=True)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas = (0.9, 0.999))
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=25, factor = 0.5, verbose=True)
 
     epoch = 0
     step = 0
@@ -393,7 +393,7 @@ def main(args = None):
                 cls_loss = np.mean(loss_classification_ls)
                 reg_loss = np.mean(loss_regression_ls)
                 transformation_loss = np.mean(loss_transformation_ls)
-                loss = 1.0*cls_loss + 1.0*reg_loss + 0.2*transformation_loss
+                loss = 1.0*cls_loss + 1.0*reg_loss + 0.02*transformation_loss
 
                 print(
                     'Val. Epoch: {}/{}. Classification loss: {:1.5f}. Regression loss: {:1.5f}. Transformation loss: {:.5f}. Total loss: {:1.5f}'.format(

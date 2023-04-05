@@ -821,8 +821,13 @@ def filter_detections(
             # perform NMS
             # filtered_boxes = tf.concat([filtered_boxes[..., 1:2], filtered_boxes[..., 0:1],
             #                             filtered_boxes[..., 3:4], filtered_boxes[..., 2:3]], axis=-1)
-            nms_indices = tf.image.non_max_suppression(filtered_boxes, filtered_scores, max_output_size=max_detections,
-                                                       iou_threshold=nms_threshold)
+            # nms_indices = tf.image.non_max_suppression(filtered_boxes, filtered_scores, max_output_size=max_detections,
+            #                                            iou_threshold=nms_threshold)
+            nms_indices = nms_torch(boxes = filtered_boxes, 
+                                    scores = filtered_scores, 
+                                    iou_threshold=nms_threshold)[:max_detections]
+            #nms_indices = nms_indices[:max_detections]
+
 
             # filter indices based on NMS
             # (num_score_nms_keeps, 1)
@@ -929,8 +934,8 @@ class FilterDetections(nn.Module):
         """
         boxes = inputs[0]
         classification = inputs[1]
-        rotation = inputs[2]
-        translation = inputs[3]
+        translation = inputs[2]
+        rotation = inputs[3]
 
         # wrap nms with our parameters
         def _filter_detections(args):
@@ -954,6 +959,7 @@ class FilterDetections(nn.Module):
             )
 
         # call filter_detections on each batch item
+        # 这一段处理肯定有问题  outputs应该是对每个filter_对象的append
         outputs = []
         for i in range((boxes.shape)[0]):
             assert (boxes[i].shape)[0] == (classification[i].shape)[0]
