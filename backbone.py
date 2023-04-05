@@ -5,7 +5,7 @@ from torch import nn
 
 from efficientdet.model import BiFPN, Regressor, Classifier,TranslationNet,RotationNet, EfficientNet
 from efficientdet.utils import Anchors
-from Transformer import  MultiHeadAttention
+from Transformer import  MultiHeadAttention, create_pad_mask
 
 class EfficientPoseBackbone(nn.Module):
     def __init__(self, num_classes=8, 
@@ -197,6 +197,26 @@ class EfficientPoseBackbone_MSA(nn.Module): # MSA: Multihead Self Attention
                                pyramid_levels=(torch.arange(self.pyramid_levels[self.compound_coef]) + 3).tolist(),
                                **kwargs)
 
+        self.attn_p3 = MultiHeadAttention(hidden_size=self.input_sizes[self.compound_coef]//8, #B*64*64*64
+                                       head_size=8,
+                                       dropout_rate=0.1)
+        
+        self.attn_p4 = MultiHeadAttention(hidden_size=self.input_sizes[self.compound_coef]//16, #B*128*32*32
+                                        head_size=8,
+                                        dropout_rate=0.1)
+
+        self.attn_p5 = MultiHeadAttention(hidden_size=self.input_sizes[self.compound_coef]//32, #16*16
+                                       head_size=4,
+                                       dropout_rate=0.1)
+        
+        self.attn_p6 = MultiHeadAttention(hidden_size=self.input_sizes[self.compound_coef]//64, #8*8
+                                        head_size=2,
+                                        dropout_rate=0.1)
+
+        self.attn_p7 = MultiHeadAttention(hidden_size=self.input_sizes[self.compound_coef]//128, #4*4
+                                        head_size=1,
+                                        dropout_rate=0.1)
+        
         self.backbone_net = EfficientNet(self.backbone_compound_coef[compound_coef], load_weights)
 
     def freeze_bn(self):
@@ -213,14 +233,18 @@ class EfficientPoseBackbone_MSA(nn.Module): # MSA: Multihead Self Attention
         features = (p3, p4, p5)
         features = self.bifpn(features)
 
+        features = (self.attn_p3(features[0], features[0], features[0]), 
+                    self.attn_p4(features[1], features[1], features[1]), 
+                    self.attn_p5(features[2], features[2], features[2]), 
+                    self.attn_p6(features[3], features[3], features[3]), 
+                    self.attn_p7(features[4], features[4], features[4]))
+
         regression = self.regressor(features)
         classification = self.classifier(features)
         translation  = self.translation(features)
         rotation = self.rotation([features,input_cam])
         
         anchors = self.anchors(input_img, input_img.dtype)
-
-
         
         return features, regression, classification, translation, rotation, anchors
 
@@ -309,10 +333,6 @@ class EfficientPoseBackbone_WMSA(nn.Module): # WMSA: Windowed Multihead Self Att
         self.anchors = Anchors(anchor_scale=self.anchor_scale[compound_coef],
                                pyramid_levels=(torch.arange(self.pyramid_levels[self.compound_coef]) + 3).tolist(),
                                **kwargs)
-        
-        self.attn = MultiHeadAttention(hidden_size=self.subnet_widths[self.compound_coef],
-                                       head_size=8,
-                                       dropout_rate=0.1)
 
         self.backbone_net = EfficientNet(self.backbone_compound_coef[compound_coef], load_weights)
 

@@ -30,7 +30,7 @@ import torch.nn as nn
 from torch.backends import cudnn
 
 from efficientdet.model import FilterDetections
-from backbone import EfficientPoseBackbone
+from backbone import EfficientPoseBackbone, EfficientPoseBackbone_MSA
 from efficientdet.utils import BBoxTransform, ClipBoxes
 from utils.utils import STANDARD_COLORS, standard_to_bgr, get_index_label, plot_one_box,postprocess_det
 from utils.utils import preprocess_pose, postprocess_pose, get_linemod_camera_matrix, get_linemod_3d_bboxes
@@ -99,7 +99,7 @@ def main():
     print("\nInfo: found {} image files".format(len(image_list)))   
     
     #build model and load weights
-    model = EfficientPoseBackbone(
+    model = EfficientPoseBackbone_MSA(
         compound_coef=compound_coef, 
         num_classes=num_classes,
         ratios=anchor_ratios, 

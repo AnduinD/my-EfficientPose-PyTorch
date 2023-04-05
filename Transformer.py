@@ -32,7 +32,7 @@ class MultiHeadAttention(nn.Module):
         super(MultiHeadAttention, self).__init__()
 
         self.head_size = head_size
-
+        self.hidden_size = hidden_size
         self.att_size = att_size = hidden_size // head_size
         self.scale = att_size ** -0.5
 
@@ -49,7 +49,7 @@ class MultiHeadAttention(nn.Module):
                                       bias=False)
         initialize_weight(self.output_layer)
 
-    def forward(self, q, k, v, mask, cache=None):
+    def forward(self, q, k, v, mask=None, cache=None):
         orig_q_size = q.size()
 
         d_k = self.att_size
@@ -58,14 +58,14 @@ class MultiHeadAttention(nn.Module):
 
         # head_i = Attention(Q(W^Q)_i, K(W^K)_i, V(W^V)_i)
         q = self.linear_q(q).view(batch_size, -1, self.head_size, d_k)
-        if cache is not None and 'encdec_k' in cache:
-            k, v = cache['encdec_k'], cache['encdec_v']
-        else:
-            k = self.linear_k(k).view(batch_size, -1, self.head_size, d_k)
-            v = self.linear_v(v).view(batch_size, -1, self.head_size, d_v)
+        # if cache is not None and 'encdec_k' in cache:
+        #     k, v = cache['encdec_k'], cache['encdec_v']
+        #else:
+        k = self.linear_k(k).view(batch_size, -1, self.head_size, d_k)
+        v = self.linear_v(v).view(batch_size, -1, self.head_size, d_v)
 
-            if cache is not None:
-                cache['encdec_k'], cache['encdec_v'] = k, v
+            # if cache is not None:
+            #     cache['encdec_k'], cache['encdec_v'] = k, v
 
         q = q.transpose(1, 2)                  # [b, h, q_len, d_k]
         v = v.transpose(1, 2)                  # [b, h, v_len, d_v]
@@ -75,17 +75,19 @@ class MultiHeadAttention(nn.Module):
         # Attention(Q, K, V) = softmax((QK^T)/sqrt(d_k))V
         q.mul_(self.scale)
         x = torch.matmul(q, k)  # [b, h, q_len, k_len]
-        x.masked_fill_(mask.unsqueeze(1), -1e9)
+        if mask is not None:
+            x.masked_fill_(mask.unsqueeze(1), -1e9)
         x = torch.softmax(x, dim=3)
-        x = self.att_dropout(x)
+        #x = self.att_dropout(x)
         x = x.matmul(v)  # [b, h, q_len, attn]
 
         x = x.transpose(1, 2).contiguous()  # [b, q_len, h, attn]
-        x = x.view(batch_size, -1, self.head_size * d_v)
+        x = x.view(batch_size, -1, self.head_size * d_v) # [B, H*W, C(hidden_size)]
 
-        x = self.output_layer(x)
+        x = self.output_layer(x).permute(0,2,1).contiguous() # [B, C(hidden_size), H*W]
+        x = x.view(orig_q_size) # [B, C, H, W]
 
-        assert x.size() == orig_q_size
+        #assert x.size() == orig_q_size
         return x
 
 

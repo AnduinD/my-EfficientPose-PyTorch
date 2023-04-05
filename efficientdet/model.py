@@ -710,7 +710,6 @@ class RotationNet(nn.Module):
 
         return feats  # 多尺度
 
-
 class EfficientNet(nn.Module):
     """
     modified by Zylo117
