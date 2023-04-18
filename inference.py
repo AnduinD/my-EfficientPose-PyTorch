@@ -99,7 +99,7 @@ def main():
     print("\nInfo: found {} image files".format(len(image_list)))   
     
     #build model and load weights
-    model = EfficientPoseBackbone_MSA(
+    model = EfficientPoseBackbone(
         compound_coef=compound_coef, 
         num_classes=num_classes,
         ratios=anchor_ratios, 
@@ -112,7 +112,7 @@ def main():
     # del temp_weight['classifier.header.pointwise_conv.conv.bias']
     model.load_state_dict(temp_weight, strict = False) # 类别数变了 删掉这部分权重再load
  
-    #model = ModelWithFilterDet(model)
+    model = ModelWithFilterDet(model)
 
     model.requires_grad_(False)
     model.eval()
@@ -139,8 +139,8 @@ def main():
             #original_image = image.copy()
             
             #preprocessing
-            image_size = model.input_sizes[compound_coef] # type: ignore
-            # image_size = model.model.input_sizes[compound_coef] # type: ignore
+            # image_size = model.input_sizes[compound_coef] # type: ignore
+            image_size = model.model.input_sizes[compound_coef] # type: ignore
             input_list, scale = preprocess_pose(image, image_size, camera_matrix, translation_scale_norm)
 
             input_batch_list[0].append(input_list[0]) # img_batch_list

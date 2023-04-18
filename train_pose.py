@@ -8,7 +8,7 @@ import torch.nn as nn
 #from tensorflow.keras.optimizers import Adam
 from torch.utils.tensorboard import SummaryWriter #type:ignore
 
-from backbone import EfficientPoseBackbone
+from backbone import EfficientPoseBackbone, EfficientPoseBackbone_MSA
 from torch.nn import SmoothL1Loss
 from efficientdet.loss import FocalLoss
 from loss_6DoF import  transformation_loss #smooth_l1,
@@ -47,13 +47,23 @@ def parse_args(args):
     #                               default='../datasets/Linemod_preprocessed',
     #                               help = 'Path to dataset dir (ie. /Datasets/Linemod_preprocessed).')
 
-    parser.add_argument('--rotation-representation', 
-                        default = 'axis_angle', 
-                        help = 'Which representation of the rotation should be used. Choose from "axis_angle", "rotation_matrix" and "quaternion"')    
-
     parser.add_argument('--weights',
-                        default='./weights/trained/efficientpose-d0_linemod_obj8_one_last_train.pth', 
+                        #default= 'imagenet',
+                        default='./weights/trained_MSA/efficientpose-d0_linemod_obj8_one_best_train.pth', 
                         help = 'File containing weights to init the model parameter')
+    parser.add_argument('--save_path', 
+                        help = 'path where to save the predicted validation images after each epoch', 
+                        default = './weights/trained_MSA')
+    parser.add_argument('--es_patience',
+                        help='patience for early stopping',
+                        default=25, type=int)
+    parser.add_argument('--save_interval',
+                        help='interval for saving model',
+                        default=3000, type=int)
+    parser.add_argument('--val_interval',
+                        help='interval for validation',
+                        default = 10, type=int)
+    
     parser.add_argument('--freeze-backbone', 
                         help = 'Freeze training of backbone layers.', 
                         action = 'store_true')
@@ -63,16 +73,19 @@ def parse_args(args):
 
     parser.add_argument('--batch-size',
                         help = 'Size of the batches.',
-                        default = 1, type = int)
+                        default = 2, type = int)
     parser.add_argument('--lr', 
                         help = 'Learning rate',
-                        default = 1e-4, type = float)
+                        default = 1e-3, type = float)
     parser.add_argument('--no-color-augmentation', 
                         help = 'Do not use colorspace augmentation', 
                         action = 'store_true')
     parser.add_argument('--no-6dof-augmentation', 
                         help = 'Do not use 6DoF augmentation', 
                         action = 'store_true')
+    parser.add_argument('--rotation-representation', 
+                        default = 'axis_angle', 
+                        help = 'Which representation of the rotation should be used. Choose from "axis_angle", "rotation_matrix" and "quaternion"')    
     parser.add_argument('--phi', 
                         help = 'Hyper parameter phi', 
                         default = 0, type = int, 
@@ -89,6 +102,7 @@ def parse_args(args):
     # parser.add_argument('--steps', 
     #                     help = 'Number of steps per epoch.', 
     #                     type = int, default = int(179 * 10))
+
     parser.add_argument('--snapshot-path', 
                         help = 'Path to store snapshots of models during training', 
                         default = os.path.join("checkpoints", date_and_time))
@@ -109,18 +123,6 @@ def parse_args(args):
     parser.add_argument('--score-threshold', 
                         help = 'score threshold for non max suppresion', 
                         type = float, default = 0.5)
-    parser.add_argument('--save_path', 
-                        help = 'path where to save the predicted validation images after each epoch', 
-                        default = './weights/trained')
-    parser.add_argument('--es_patience',
-                        help='patience for early stopping',
-                        default=10, type=int)
-    parser.add_argument('--save_interval',
-                        help='interval for saving model',
-                        default=1000, type=int)
-    parser.add_argument('--val_interval',
-                        help='interval for validation',
-                        default = 10, type=int)
 
     # # Fit generator arguments
     # parser.add_argument('--multiprocessing', 
@@ -195,7 +197,8 @@ def main(args = None):
     
     args = parse_args(args)
     args.num_gpus = len(args.gpu) if args.gpu else 0    
-    
+    args.save_path = os.path.join(args.save_path, f'obj_{args.object_id}')
+
     # create the generators
     print("\nCreating the Generators...")
     train_generator, validation_generator = create_generators(args)
@@ -211,7 +214,7 @@ def main(args = None):
     print("\nBuilding the Model...")
 
     #build model and load weights
-    model = EfficientPoseBackbone(compound_coef=args.phi, 
+    model = EfficientPoseBackbone_MSA(compound_coef=args.phi, 
                                   num_classes=num_classes,
                                   num_anchors=num_anchors,
                                   freeze_bn=not args.no_freeze_bn,
@@ -225,7 +228,7 @@ def main(args = None):
             print('Loading model, this may take a second...')
             model_name = 'efficientdet-d{}'.format(args.phi)
             file_name = '{}.pth'.format(model_name)
-            weights_path = f'weights/{file_name}'
+            weights_path = f'weights/pretrained_efficientdet/{file_name}'
             temp_weight = torch.load(weights_path, map_location='cpu')
             del temp_weight['classifier.header.pointwise_conv.conv.weight']
             del temp_weight['classifier.header.pointwise_conv.conv.bias']
@@ -275,7 +278,8 @@ def main(args = None):
             if use_sync_bn:
                 patch_replication_callback(model)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas = (0.9, 0.999))
+    # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas = (0.9, 0.999))
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum = 0.9)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=25, factor = 0.5, verbose=True)
 
     epoch = 0
@@ -365,7 +369,7 @@ def main(args = None):
                 loss_classification_ls = []
                 loss_transformation_ls = []
                 print(f"validating...")
-                for iter, data in enumerate(validation_generator): # type: ignore
+                for iter, data in enumerate(tqdm(validation_generator)): # type: ignore
                     if iter >= len_validation_generator: 
                         break # 一个epoch结束 因为这个generator会循环生成 所以得手动退出
                     with torch.no_grad():
