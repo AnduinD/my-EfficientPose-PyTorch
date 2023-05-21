@@ -8,7 +8,7 @@ import torch.nn as nn
 #from tensorflow.keras.optimizers import Adam
 from torch.utils.tensorboard import SummaryWriter #type:ignore
 
-from backbone import EfficientPoseBackbone, EfficientPoseBackbone_MSA
+from backbone import EfficientPoseBackbone, EfficientPoseBackbone_MSA_mixed 
 from torch.nn import SmoothL1Loss
 from efficientdet.loss import FocalLoss
 from loss_6DoF import  transformation_loss #smooth_l1,
@@ -49,41 +49,41 @@ def parse_args(args):
 
     parser.add_argument('--weights',
                         #default= 'imagenet',
-                        default='./weights/trained_MSA/efficientpose-d0_linemod_obj8_one_best_train.pth', 
+                        default='./weights/trained_MSA_Mixed/efficientpose-d0_linemod_obj8_one_best_train.pth', 
                         help = 'File containing weights to init the model parameter')
     parser.add_argument('--save_path', 
                         help = 'path where to save the predicted validation images after each epoch', 
-                        default = './weights/trained_MSA')
+                        default = './weights/trained_MSA_Mixed')
     parser.add_argument('--es_patience',
                         help='patience for early stopping',
                         default=25, type=int)
     parser.add_argument('--save_interval',
                         help='interval for saving model',
-                        default=3000, type=int)
+                        default=1000, type=int)
     parser.add_argument('--val_interval',
                         help='interval for validation',
                         default = 10, type=int)
     
-    parser.add_argument('--freeze-backbone', 
+    parser.add_argument('--freeze_backbone', 
                         help = 'Freeze training of backbone layers.', 
                         action = 'store_true')
-    parser.add_argument('--no-freeze-bn', 
+    parser.add_argument('--no_freeze_bn', 
                         help = 'Do not freeze training of BatchNormalization layers.',
                         action = 'store_true')
 
-    parser.add_argument('--batch-size',
+    parser.add_argument('--batch_size',
                         help = 'Size of the batches.',
                         default = 2, type = int)
     parser.add_argument('--lr', 
                         help = 'Learning rate',
                         default = 1e-3, type = float)
-    parser.add_argument('--no-color-augmentation', 
+    parser.add_argument('--no_color_augmentation', 
                         help = 'Do not use colorspace augmentation', 
-                        action = 'store_true')
-    parser.add_argument('--no-6dof-augmentation', 
+                        action = 'store_true', default = False)
+    parser.add_argument('--no_6dof_augmentation', 
                         help = 'Do not use 6DoF augmentation', 
-                        action = 'store_true')
-    parser.add_argument('--rotation-representation', 
+                        action = 'store_true', default = False)
+    parser.add_argument('--rotation_representation', 
                         default = 'axis_angle', 
                         help = 'Which representation of the rotation should be used. Choose from "axis_angle", "rotation_matrix" and "quaternion"')    
     parser.add_argument('--phi', 
@@ -103,24 +103,24 @@ def parse_args(args):
     #                     help = 'Number of steps per epoch.', 
     #                     type = int, default = int(179 * 10))
 
-    parser.add_argument('--snapshot-path', 
-                        help = 'Path to store snapshots of models during training', 
-                        default = os.path.join("checkpoints", date_and_time))
+    # parser.add_argument('--snapshot_path', 
+    #                     help = 'Path to store snapshots of models during training', 
+    #                     default = os.path.join("checkpoints", date_and_time))
     parser.add_argument('--log_path', 
                         help = 'Log directory for Tensorboard output', 
                         default = os.path.join("logs", date_and_time))
-    parser.add_argument('--no-snapshots', 
-                        help = 'Disable saving snapshots.', 
-                        dest = 'snapshots', 
-                        action = 'store_false')
+    # parser.add_argument('--no_snapshots', 
+    #                     help = 'Disable saving snapshots.', 
+    #                     dest = 'snapshots', 
+    #                     action = 'store_false')
     # parser.add_argument('--no-evaluation', 
     #                     help = 'Disable per epoch evaluation.', 
     #                     dest = 'evaluation', action = 'store_false')
-    parser.add_argument('--compute-val-loss', 
+    parser.add_argument('--compute_val_loss', 
                         help = 'Compute validation loss during training', 
                         dest = 'compute_val_loss', action = 'store_true',
                         default=True)
-    parser.add_argument('--score-threshold', 
+    parser.add_argument('--score_threshold', 
                         help = 'score threshold for non max suppresion', 
                         type = float, default = 0.5)
 
@@ -153,7 +153,7 @@ class ModelWithLoss(nn.Module):
         self.debug = debug
 
     def forward(self, inputs, annotations, obj_list=None):
-        features, regression, classification, translation, rotation, anchors = self.model(inputs)
+        features, regression, classification, translation, rotation, anchors, _ = self.model(inputs)
         
         from loss_6DoF import gather_nd_simple
         if self.debug:
@@ -214,12 +214,12 @@ def main(args = None):
     print("\nBuilding the Model...")
 
     #build model and load weights
-    model = EfficientPoseBackbone_MSA(compound_coef=args.phi, 
-                                  num_classes=num_classes,
-                                  num_anchors=num_anchors,
-                                  freeze_bn=not args.no_freeze_bn,
-                                  #score_threshold = args.score_threshold,
-                                  num_rotation_parameters = num_rotation_parameters)
+    model = EfficientPoseBackbone_MSA_mixed(compound_coef=args.phi, 
+                                            num_classes=num_classes,
+                                            num_anchors=num_anchors,
+                                            freeze_bn=not args.no_freeze_bn,
+                                            #score_threshold = args.score_threshold,
+                                            num_rotation_parameters = num_rotation_parameters)
 
     print("Done!")
     # load pretrained weights
@@ -237,10 +237,12 @@ def main(args = None):
             # model.load_state_dict(temp_weight, strict = False)
             print("\nDone!")
         else:
+            model.load_state_dict(torch.load(args.weights), strict=False)
             print('Loading model, this may take a second...')
             temp_weight = torch.load(args.weights, map_location='cpu')
-            model.load_state_dict(temp_weight, strict = False) # 类别数变了 删掉这部分权重再load
+            model.load_state_dict(temp_weight, strict = False) 
             print("\nDone!")
+
 
     # freeze backbone layers
     if args.freeze_backbone:
@@ -280,6 +282,7 @@ def main(args = None):
     
     # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas = (0.9, 0.999))
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum = 0.9)
+    #optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas = (0.9, 0.999), amsgrad=False)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=25, factor = 0.5, verbose=True)
 
     epoch = 0
@@ -343,6 +346,7 @@ def main(args = None):
                     writer.add_scalars('Loss', {'train': loss}, step)
                     writer.add_scalars('Regression_loss', {'train': reg_loss}, step)
                     writer.add_scalars('Classfication_loss', {'train': cls_loss}, step)
+                    writer.add_scalars('Transformation_loss', {'train': transformation_loss}, step)
 
                     # log learning_rate
                     current_lr = optimizer.param_groups[0]['lr']
@@ -405,6 +409,7 @@ def main(args = None):
                 writer.add_scalars('Loss', {'val': loss}, step)
                 writer.add_scalars('Regression_loss', {'val': reg_loss}, step)
                 writer.add_scalars('Classfication_loss', {'val': cls_loss}, step)
+                writer.add_scalars('Transformation_loss', {'val': transformation_loss}, step)
 
                 if loss < best_loss:
                     best_loss = loss
@@ -475,7 +480,7 @@ def create_generators(args):
     elif args.dataset_type == 'occlusion':
         from generators.occlusion import OcclusionGenerator
         train_generator = OcclusionGenerator(
-            args.occlusion_path,
+            args.linemod_path,#args.occlusion_path,
             rotation_representation = args.rotation_representation,
             use_colorspace_augmentation = not args.no_color_augmentation,
             use_6DoF_augmentation = not args.no_6dof_augmentation,
@@ -483,7 +488,7 @@ def create_generators(args):
         )
 
         validation_generator = OcclusionGenerator(
-            args.occlusion_path,
+            args.linemod_path,#args.occlusion_path,
             train = False,
             shuffle_dataset = False,
             shuffle_groups = False,

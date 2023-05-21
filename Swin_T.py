@@ -367,6 +367,81 @@ class SwinTransformerBlock(nn.Module):
         return x
 
 
+class WMSA_layer(nn.Module):
+    r""" a single with (shifted) window multihead self-attention (W-MSA) for whole input feature map.
+    Args:
+        dim (int): Number of input channels.
+        num_heads (int): Number of attention heads.
+        window_size (int): Window size.
+        shift_size (int): Shift size for SW-MSA.
+        qkv_bias (bool, optional): If True, add a learnable bias to query, key, value. Default: True
+        drop (float, optional): Dropout rate. Default: 0.0
+        attn_drop (float, optional): Attention dropout rate. Default: 0.0
+    """
+
+    def __init__(self, dim, num_heads, window_size=7, shift_size=0,
+                 qkv_bias=True, drop=0., attn_drop=0.):
+        super().__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+        self.window_size = window_size
+        self.shift_size = shift_size
+        assert 0 <= self.shift_size < self.window_size, "shift_size must in 0-window_size"
+
+        self.attn = WindowAttention(
+            dim, window_size=(self.window_size, self.window_size), num_heads=num_heads, qkv_bias=qkv_bias,
+            attn_drop=attn_drop, proj_drop=drop)
+
+    def forward(self, x, attn_mask = None):
+        #H, W = self.H, self.W
+        #B, L, C = x.shape
+        # assert L == H * W, "input feature has wrong size" # type: ignore
+
+        x = x.permute(0,2,3,1) # [B, C, H, W] --> [B, H, W, C]
+        B, H, W, C = x.shape
+        # x = x.view(B, H, W, C)
+
+        # pad feature maps to multiples of window size
+        # 把feature map给pad到window size的整数倍
+        pad_l = pad_t = 0
+        pad_r = (self.window_size - W % self.window_size) % self.window_size # type: ignore
+        pad_b = (self.window_size - H % self.window_size) % self.window_size # type: ignore
+        x = F.pad(x, (0, 0, pad_l, pad_r, pad_t, pad_b))
+        _, Hp, Wp, _ = x.shape
+
+        # cyclic shift
+        if self.shift_size > 0:
+            shifted_x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
+        else:
+            shifted_x = x
+            attn_mask = None
+
+        # partition windows
+        x_windows = window_partition(shifted_x, self.window_size)  # [nW*B, Mh, Mw, C]
+        x_windows = x_windows.view(-1, self.window_size * self.window_size, C)  # [nW*B, Mh*Mw, C]
+
+        # W-MSA/SW-MSA
+        attn_windows = self.attn(x_windows, mask=attn_mask)  # [nW*B, Mh*Mw, C]
+
+        # merge windows4
+        attn_windows = attn_windows.view(-1, self.window_size, self.window_size, C)  # [nW*B, Mh, Mw, C]
+        shifted_x = window_reverse(attn_windows, self.window_size, Hp, Wp)  # [B, H', W', C]
+
+        # reverse cyclic shift
+        if self.shift_size > 0:
+            x = torch.roll(shifted_x, shifts=(self.shift_size, self.shift_size), dims=(1, 2))
+        else:
+            x = shifted_x
+
+        if pad_r > 0 or pad_b > 0:
+            # 把前面pad的数据移除掉
+            x = x[:, :H, :W, :].contiguous()
+
+        # x = x.view(B, H * W, C) # type: ignore
+        x = x.view(B, H ,W, C).permute(0,3,1,2) # [B, H, W, C] --> [B, C, H, W]
+
+        return x 
+
 class BasicLayer(nn.Module):
     """
     A basic Swin Transformer layer for one stage.

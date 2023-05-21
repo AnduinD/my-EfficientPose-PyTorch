@@ -7,7 +7,7 @@ from efficientnet import EfficientNet as EffNet
 from efficientnet.utils import MemoryEfficientSwish, Swish
 from efficientnet.utils_extra import Conv2dStaticSamePadding, MaxPool2dStaticSamePadding
 
-from utils.utils import gather_torch, gather_nd_simple, gather_nd_batch
+from utils.utils import gather_torch, gather_torch_simple, gather_nd_simple, gather_nd_batch
 
 
 def nms(dets, thresh):
@@ -19,7 +19,7 @@ class SeparableConvBlock(nn.Module):
     created by Zylo117
     """
 
-    def __init__(self, in_channels, out_channels=None, norm=True, activation=False, onnx_export=False):
+    def __init__(self, in_channels, out_channels=None, norm=True, activation=False, onnx_export=False, bias=False):
         super(SeparableConvBlock, self).__init__()
         if out_channels is None:
             out_channels = in_channels
@@ -31,7 +31,7 @@ class SeparableConvBlock(nn.Module):
 
         self.depthwise_conv = Conv2dStaticSamePadding(in_channels, in_channels,
                                                       kernel_size=3, stride=1, groups=in_channels, bias=False)
-        self.pointwise_conv = Conv2dStaticSamePadding(in_channels, out_channels, kernel_size=1, stride=1)
+        self.pointwise_conv = Conv2dStaticSamePadding(in_channels, out_channels, kernel_size=1, stride=1, bias = bias)
 
         self.norm = norm
         if self.norm:
@@ -391,10 +391,11 @@ class Classifier(nn.Module):
         self.conv_list = nn.ModuleList(
             [SeparableConvBlock(in_channels, in_channels, norm=False, activation=False) for i in range(num_layers)])
         self.bn_list = nn.ModuleList(
-            [nn.ModuleList([nn.BatchNorm2d(in_channels, momentum=0.01, eps=1e-3) for i in range(num_layers)]) for j in
+            [nn.ModuleList([nn.BatchNorm2d(in_channels, momentum=0.003, eps=1e-4) for i in range(num_layers)]) for j in
              range(pyramid_levels)])
         self.header = SeparableConvBlock(in_channels, num_anchors * num_classes, norm=False, activation=False)
         self.swish = MemoryEfficientSwish() if not onnx_export else Swish()
+        #self.activation_sigmoid = nn.Sigmoid()
 
     def forward(self, inputs):
         feats = []
@@ -406,13 +407,13 @@ class Classifier(nn.Module):
             feat = self.header(feat)
 
             feat = feat.permute(0, 2, 3, 1)
-            feat = feat.contiguous().view(feat.shape[0], 
-                                          feat.shape[1], 
-                                          feat.shape[2], 
-                                          self.num_anchors, 
-                                          self.num_classes)
+            # feat = feat.contiguous().view(feat.shape[0], 
+            #                               feat.shape[1], 
+            #                               feat.shape[2], 
+            #                               self.num_anchors, 
+            #                               self.num_classes)
             feat = feat.contiguous().view(feat.shape[0], -1, self.num_classes)
-
+            # feat = self.activation_sigmoid(feat)
             feats.append(feat)
 
         # print("in classfier")
@@ -420,8 +421,7 @@ class Classifier(nn.Module):
         # print(feats[0].shape)
         # print(feats[1].shape)
         feats = torch.cat(feats, dim=1)
-        feats = feats.sigmoid()
-
+        #feats = feats.sigmoid() 注：这个sigmoid在focal loss里做了
         return feats
 
 class IterativeTranslationSubNet(nn.Module):
@@ -440,14 +440,14 @@ class IterativeTranslationSubNet(nn.Module):
         self.conv_list = nn.ModuleList(
             [SeparableConvBlock( in_channels = in_channels if i==0 else out_channels,
                                  out_channels = out_channels, 
-                                 norm=False, activation=False) 
+                                 norm=False, activation=False,bias=True) 
                                  for i in range(num_layers)])
         self.head_xy = SeparableConvBlock(in_channels = self.out_channels,
                                           out_channels = self.num_anchors * 2,
-                                          norm=False, activation=False)
+                                          norm=False, activation=False,bias=True)
         self.head_z = SeparableConvBlock(in_channels = self.out_channels, 
                                          out_channels = self.num_anchors,
-                                         norm=False, activation=False)
+                                         norm=False, activation=False,bias=True)
         
         if self.use_group_norm:
             self.norm_list = nn.ModuleList([nn.ModuleList([nn.ModuleList([
@@ -504,14 +504,14 @@ class TranslationNet(nn.Module):
         self.conv_list = nn.ModuleList([
             SeparableConvBlock(in_channels = self.in_channels,
                                out_channels = self.in_channels, 
-                               norm=False, activation=False) 
+                               norm=False, activation=False,bias=True) 
             for i in range(num_layers)])
         self.initial_translation_xy = SeparableConvBlock(in_channels = in_channels,
                                                          out_channels = self.num_anchors * 2, 
-                                                         norm=False, activation=False)
+                                                         norm=False, activation=False,bias=True)
         self.initial_translation_z = SeparableConvBlock(in_channels = in_channels,
                                                         out_channels = self.num_anchors, 
-                                                        norm=False, activation=False)
+                                                        norm=False, activation=False,bias=True)
         
         # 子网络的norm
         if self.use_group_norm:
@@ -559,10 +559,15 @@ class TranslationNet(nn.Module):
                 trans_xy = trans_xy + delta_trans_xy 
                 trans_z = trans_z + delta_trans_z 
 
-            outputs_xy = trans_xy.reshape((trans_xy.shape[0],-1,2))
-            outputs_z = trans_z.reshape((trans_xy.shape[0],-1,1))
-            outputs = torch.cat((outputs_xy,outputs_z),dim=2)
-            feats.append(outputs) # 将单层level的输出加到多尺度输出的表里
+            trans = torch.cat([trans_xy,trans_z], dim=1) # [B, 3*Anchor, Hi, Wi]
+            out_trans = trans.permute(0,2,3,1) # [B, 3*Anchor, Hi, Wi] --> [B, Hi, Wi, 3*Anchor]
+            out_trans = out_trans.contiguous().view(trans.shape[0],-1,3) # [B, Hi*Wi*Anchor, 3]
+            feats.append(out_trans)
+
+            # outputs_xy = trans_xy.reshape((trans_xy.shape[0],-1,2))
+            # outputs_z = trans_z.reshape((trans_xy.shape[0],-1,1))
+            # outputs = torch.cat((outputs_xy,outputs_z),dim=2)
+            # feats.append(outputs) # 将单层level的输出加到多尺度输出的表里
        
         # print("in translation")
         # print(len(feats))
@@ -590,11 +595,11 @@ class IterativeRotationSubNet(nn.Module):
         self.conv_list = nn.ModuleList(
             [SeparableConvBlock(in_channels = in_channels if i==0 else out_channels,
                                  out_channels = out_channels, 
-                                 norm=False, activation=False) 
+                                 norm=False, activation=False,bias=True) 
                                  for i in range(num_layers)])
         self.head_rot = SeparableConvBlock(in_channels=self.out_channels,
                                            out_channels = self.num_anchors * self.num_rot_params,
-                                           norm=False, activation=False)
+                                           norm=False, activation=False,bias=True)
 
         if self.use_group_norm:
             self.norm_list = nn.ModuleList([nn.ModuleList([nn.ModuleList([
@@ -650,11 +655,11 @@ class RotationNet(nn.Module):
         self.conv_list = nn.ModuleList([
             SeparableConvBlock(in_channels = self.in_channels,
                                out_channels = self.in_channels, 
-                               norm=False, activation=False) 
+                               norm = False, activation = False,bias = True) 
             for i in range(num_layers)])
         self.initial_rot = SeparableConvBlock(in_channels = self.in_channels,
                                               out_channels = self.num_anchors * self.num_rot_params,
-                                              norm=False, activation=False)
+                                              norm=False, activation=False,bias=True)
 
         # 子网络的norm
         if self.use_group_norm:
@@ -686,7 +691,7 @@ class RotationNet(nn.Module):
     def forward(self, inputs):
         feats = []
         feat_img = inputs[0]
-        feat_cam = inputs[1]
+        # feat_cam = inputs[1]
         for cur_level, feat, norm_list in zip(range(self.pyramid_levels), feat_img, self.norm_list): 
             # 循环多尺度level
             for cur_layer, norm, conv in zip(range(self.num_layers), norm_list, self.conv_list):  # type: ignore
@@ -702,8 +707,12 @@ class RotationNet(nn.Module):
                 delta_rot = self.iter_submodel(iter_input,cur_level,cur_iter_step) 
                 rot = rot + delta_rot 
 
-            outputs_rot = rot.reshape((rot.shape[0],-1,self.num_rot_params))
-            feats.append(outputs_rot) # 将单层level的输出加到多尺度输出的表里
+            out_rot = rot.permute(0,2,3,1) # [B, num_rot_param*Anchor,Hi, Wi] --> [B, Hi, Wi, num_rot_param*Anchor]
+            out_rot = out_rot.contiguous().view(rot.shape[0],-1,self.num_rot_params) # [B, Anchor*Hi*Wi, num_rot_param]
+            feats.append(out_rot)
+
+            # outputs_rot = rot.reshape((rot.shape[0],-1,self.num_rot_params))
+            # feats.append(outputs_rot) # 将单层level的输出加到多尺度输出的表里
         
         feats = torch.cat(feats, dim=1)
         #feats = feats.sigmoid()
@@ -813,7 +822,7 @@ def filter_detections(
             # <tf.Tensor: id=15, shape=(2, 1), dtype=float64, numpy=
             # array([[0.5],
             #        [0.7]])>
-            filtered_scores = gather_torch(scores_, indices_)[:, 0]
+            filtered_scores = gather_torch_simple(scores_, indices_)[:, 0]
 
             # perform NMS
             # filtered_boxes = tf.concat([filtered_boxes[..., 1:2], filtered_boxes[..., 0:1],
@@ -828,14 +837,16 @@ def filter_detections(
 
             # filter indices based on NMS
             # (num_score_nms_keeps, 1)
-            print(f"nms_indices.shape: {nms_indices.shape}")
-            indices_ = gather_torch(indices_, nms_indices)
+            # print(f"nms_indices.shape: {nms_indices.shape}")
+            indices_ = gather_torch_simple(indices_, nms_indices)# (num_score_nms_keeps,)
 
         # add indices to list of all indices
         # (num_score_nms_keeps, )
-        labels_ = gather_nd_simple(labels_, indices_)
+        labels_ = gather_torch_simple(labels_, indices_)
+        # labels_ = gather_nd_simple(labels_, indices_)
         # (num_score_nms_keeps, 2)
-        indices_ = torch.stack([indices_[:, 0], labels_], dim=1)
+        indices_ = torch.stack([indices_, labels_], dim=1)
+        # indices_ = torch.stack([indices_[:, 0], labels_], dim=1)
 
         return indices_
 
@@ -844,7 +855,7 @@ def filter_detections(
         # perform per class filtering
         for c in range(int(classification.shape[1])):
             scores = classification[:, c]
-            labels = c * torch.ones(((scores.shape)[0],), dtype=torch.int64)
+            labels = (c * torch.ones(((scores.shape)[0],), dtype=torch.int64)).cuda()
             all_indices.append(_filter_detections(scores, labels))
 
         # concatenate indices to single tensor
@@ -868,12 +879,12 @@ def filter_detections(
 
     # zero pad the outputs
     pad_size = max_detections - (scores.shape)[0] if max_detections - (scores.shape)[0] > 0 else 0
-    boxes = F.pad(boxes, (0, pad_size, 0, 0), value=-1)
+    boxes = F.pad(boxes, ( 0, 0, 0, pad_size), value=-1)
     scores = F.pad(scores, (0, pad_size), value=-1)
     labels = F.pad(labels, (0, pad_size), value=-1)
-    labels = labels.to('int32')
-    rotation = F.pad(rotation, (0, pad_size, 0, 0), value=-1)
-    translation = F.pad(translation, (0, pad_size, 0, 0), value=-1)
+    labels = labels.type(torch.int32)
+    rotation = F.pad(rotation, (0,0,0, pad_size), value=-1)
+    translation = F.pad(translation, (0,0, 0, pad_size), value=-1)
 
     # set shapes, since we know what they are
     boxes = boxes.view([max_detections, 4])
@@ -897,7 +908,7 @@ class FilterDetections(nn.Module):
             nms = True,
             class_specific_filter = True,
             nms_threshold = 0.5, 
-            score_threshold = 0.01,
+            score_threshold = 0.1,
             max_detections = 100,
             **kwargs
     ):
@@ -958,12 +969,38 @@ class FilterDetections(nn.Module):
 
         # call filter_detections on each batch item
         # 这一段处理肯定有问题  outputs应该是对每个filter_对象的append
-        outputs = torch.Tensor([])
+        # outputs = torch.Tensor([])
+        output_boxes = torch.Tensor([])
+        output_scores = torch.Tensor([])
+        output_labels = torch.Tensor([])
+        output_rotation = torch.Tensor([])
+        output_translation = torch.Tensor([])
         for i in range((boxes.shape)[0]):
             assert (boxes[i].shape)[0] == (classification[i].shape)[0]
             assert (boxes[i].shape)[0] == (rotation[i].shape)[0]
             assert (boxes[i].shape)[0] == (translation[i].shape)[0]
-            outputs = torch.cat((outputs, _filter_detections([boxes[i], classification[i], rotation[i], translation[i]])), dim = 0) # type: ignore
+            
+            boxes_i = boxes[i].squeeze(dim=0)
+            classification_i = classification[i].squeeze(dim=0)
+            rotation_i = rotation[i].squeeze(dim=0)
+            translation_i = translation[i].squeeze(dim=0)
+
+            output_i = _filter_detections([boxes_i, classification_i, rotation_i, translation_i])  # return a list of [boxes, scores, labels, rotation, translation].
+            #outputs = torch.cat((outputs, _filter_detections([boxes[i], classification[i], rotation[i], translation[i]])), dim = 0) # type: ignore
+            
+            if i == 0:
+                output_boxes = output_i[0].unsqueeze(0)
+                output_scores = output_i[1].unsqueeze(0)
+                output_labels = output_i[2].unsqueeze(0)
+                output_rotation = output_i[3].unsqueeze(0)
+                output_translation = output_i[4].unsqueeze(0)
+            else:
+                output_boxes = torch.cat((output_boxes, output_i[0].unsqueeze(0)), dim = 0)
+                output_scores = torch.cat((output_scores, output_i[1].unsqueeze(0)), dim = 0)
+                output_labels = torch.cat((output_labels, output_i[2].unsqueeze(0)), dim = 0)
+                output_rotation = torch.cat((output_rotation, output_i[3].unsqueeze(0)), dim = 0)
+                output_translation = torch.cat((output_translation, output_i[4].unsqueeze(0)), dim = 0)
+
 
             # if i == 0:
             #     filtered_boxes = outputs[0]  
@@ -985,7 +1022,7 @@ class FilterDetections(nn.Module):
         #     parallel_iterations=self.parallel_iterations
         # )
 
-        return outputs
+        return [output_boxes, output_scores, output_labels, output_rotation, output_translation]
 
     def compute_output_shape(self, input_shape):
         """

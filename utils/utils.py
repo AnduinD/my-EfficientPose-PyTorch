@@ -126,40 +126,40 @@ def postprocess_det(x, anchors, regression, classification, regressBoxes, clipBo
 
     return out
 
-# def postprocess_pose(boxes, scores, labels, rotations, translations, scale, score_threshold):
-#     """
-#     Filter out detections with low confidence scores and rescale the outputs of EfficientPose
-#     Args:
-#         boxes: numpy array [batch_size = 1, max_detections, 4] containing the 2D bounding boxes
-#         scores: numpy array [batch_size = 1, max_detections] containing the confidence scores
-#         labels: numpy array [batch_size = 1, max_detections] containing class label
-#         rotations: numpy array [batch_size = 1, max_detections, 3] containing the axis angle rotation vectors
-#         translations: numpy array [batch_size = 1, max_detections, 3] containing the translation vectors
-#         scale: The scale factor of the resized input image and the original image
-#         score_threshold: Minimum score threshold at which a prediction is not filtered out
-#     Returns:
-#         boxes: numpy array [num_valid_detections, 4] containing the 2D bounding boxes
-#         scores: numpy array [num_valid_detections] containing the confidence scores
-#         labels: numpy array [num_valid_detections] containing class label
-#         rotations: numpy array [num_valid_detections, 3] containing the axis angle rotation vectors
-#         translations: numpy array [num_valid_detections, 3] containing the translation vectors
+def postprocess_pose_org(boxes, scores, labels, rotations, translations, scale, score_threshold):
+    """
+    Filter out detections with low confidence scores and rescale the outputs of EfficientPose
+    Args:
+        boxes: numpy array [batch_size = 1, max_detections, 4] containing the 2D bounding boxes
+        scores: numpy array [batch_size = 1, max_detections] containing the confidence scores
+        labels: numpy array [batch_size = 1, max_detections] containing class label
+        rotations: numpy array [batch_size = 1, max_detections, 3] containing the axis angle rotation vectors
+        translations: numpy array [batch_size = 1, max_detections, 3] containing the translation vectors
+        scale: The scale factor of the resized input image and the original image
+        score_threshold: Minimum score threshold at which a prediction is not filtered out
+    Returns:
+        boxes: numpy array [num_valid_detections, 4] containing the 2D bounding boxes
+        scores: numpy array [num_valid_detections] containing the confidence scores
+        labels: numpy array [num_valid_detections] containing class label
+        rotations: numpy array [num_valid_detections, 3] containing the axis angle rotation vectors
+        translations: numpy array [num_valid_detections, 3] containing the translation vectors
 
-#     """
-#     boxes, scores, labels, rotations, translations = np.squeeze(boxes), np.squeeze(scores), np.squeeze(labels), np.squeeze(rotations), np.squeeze(translations)
-#     # correct boxes for image scale
-#     boxes /= scale
-#     #rescale rotations
-#     rotations *= math.pi
-#     #filter out detections with low scores
-#     indices = np.where(scores[:] > score_threshold)
-#     # select detections
-#     scores = scores[indices]
-#     boxes = boxes[indices]
-#     rotations = rotations[indices]
-#     translations = translations[indices]
-#     labels = labels[indices]
+    """
+    boxes, scores, labels, rotations, translations = np.squeeze(boxes), np.squeeze(scores), np.squeeze(labels), np.squeeze(rotations), np.squeeze(translations)
+    # correct boxes for image scale
+    boxes /= scale
+    #rescale rotations
+    rotations *= math.pi
+    #filter out detections with low scores
+    indices = np.where(scores[:] > score_threshold)
+    # select detections
+    scores = scores[indices]
+    boxes = boxes[indices]
+    rotations = rotations[indices]
+    translations = translations[indices]
+    labels = labels[indices]
     
-#     return boxes, scores, labels, rotations, translations
+    return boxes, scores, labels, rotations, translations
 
 
 def postprocess_pose(input_imgs, anchors, 
@@ -652,11 +652,19 @@ def postprocess_boxes(boxes, scale, height, width):
 
 
 def gather_torch(params, indices, axis=None):
-  dim = axis
-  new_size = params.size()[:dim] + indices.size() + params.size()[dim+1:] #type:ignore
-  out = params.index_select(index=indices.view(-1), dim=dim)
-  out.view(new_size)   
-  return out
+    dim = axis if axis else 0
+    new_size = params.size()[:dim] + indices.size() + params.size()[dim+1:] #type:ignore
+    out = params.index_select(index=indices.view(-1), dim=dim)
+    return out.view(new_size) 
+
+def gather_torch_simple(reference, indices): 
+    '''
+    tf.keras.backend.gather 
+    Retrieves the elements of indices indices in the tensor reference.
+    '''
+    new_size = indices.size()
+    out = reference.index_select(index=indices.view(-1), dim=0)
+    return out.view(new_size)
 
 
 def gather_nd_batch(params, indices, batch_dim=1):

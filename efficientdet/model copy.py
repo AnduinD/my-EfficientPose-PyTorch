@@ -571,7 +571,7 @@ class TranslationNet(nn.Module):
         # print(feats[0].shape)
         # print(feats[1].shape)
         feats = torch.cat(feats, dim=1)
-        feats = feats.sigmoid()
+        # feats = feats.sigmoid()
 
         return feats  # 多尺度
 
@@ -708,7 +708,7 @@ class RotationNet(nn.Module):
             feats.append(outputs_rot) # 将单层level的输出加到多尺度输出的表里
         
         feats = torch.cat(feats, dim=1)
-        feats = feats.sigmoid()
+        # feats = feats.sigmoid()
 
         return feats  # 多尺度
 

@@ -45,7 +45,7 @@ import sys
 import torch
 import torch.nn as nn
 
-from backbone import EfficientPoseBackbone
+from backbone import EfficientPoseBackbone_WMSA
 from inference_org import ModelWithFilterDet
 from eval.common import evaluate #type:ignore
 
@@ -79,7 +79,7 @@ def parse_args(args):
                         default = 'axis_angle')
 
     parser.add_argument('--weights', 
-                        default='./weights/trained/obj_8/efficientpose-d0_linemod_obj8_one_best_train.pth',
+                        default='./weights/trained_WMSA/obj_8/efficientpose-d0_linemod_obj8_one_best_train.pth',
                         help = 'File containing weights to init the model parameter')
 
     parser.add_argument('--batch-size', 
@@ -135,7 +135,7 @@ def main(args=None):
     #     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
     print("\nBuilding the Model...")
-    model = EfficientPoseBackbone(compound_coef = args.phi,
+    model = EfficientPoseBackbone_WMSA(compound_coef = args.phi,
                                     num_classes = num_classes,
                                     num_anchors = num_anchors,
                                     freeze_bn = True,
@@ -216,7 +216,7 @@ def create_generators(args):
     return generator  
 
 
-def evaluate_model(model, generator, save_path, score_threshold = 0.5, iou_threshold = 0.5, max_detections = 100, diameter_threshold = 0.1):
+def evaluate_model(model, generator, save_path, score_threshold = 0.5, iou_threshold = 0.1, max_detections = 100, diameter_threshold = 0.1):
     """
     Evaluates a given model using the data from the given generator.
 

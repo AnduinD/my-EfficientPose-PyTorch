@@ -76,51 +76,54 @@ from utils.utils import gather_nd_simple, gather_torch # gather_nd_batch
 #     return _focal
 
 
-# def smooth_l1(sigma=3.0):
-#     """
-#     Create a smooth L1 loss functor.
-#     Args:
-#         sigma: This argument defines the point where the loss changes from L2 to L1.
-#     Returns:
-#         A functor for computing the smooth L1 loss given target data and predicted data.
-#     """
-#     sigma_squared = sigma ** 2
+class my_smooth_l1(nn.Module):
+    """
+    Create a smooth L1 loss functor.
+    Args:
+        sigma: This argument defines the point where the loss changes from L2 to L1.
+    Returns:
+        A functor for computing the smooth L1 loss given target data and predicted data.
+    """
+    def __init__(self, sigma=3.0):
+        super(my_smooth_l1, self).__init__()
 
-#     def _smooth_l1(y_true, y_pred):
-#         """ Compute the smooth L1 loss of y_pred w.r.t. y_true.
-#         Args:
-#             y_true: Tensor from the generator of shape (B, N, 5). The last value for each box is the state of the anchor (ignore, negative, positive).
-#             y_pred: Tensor from the network of shape (B, N, 4).
-#         Returns:
-#             The smooth L1 loss of y_pred w.r.t. y_true.
-#         """
-#         # separate target and state
-#         regression = y_pred
-#         regression_target = y_true[:, :, :-1]
-#         anchor_state = y_true[:, :, -1]
+        self.sigma = sigma
+        self.sigma_squared = sigma ** 2
 
-#         # filter out "ignore" anchors
-#         indices = torch.where(torch.equal(anchor_state, 1))
-#         regression = gather_nd_torch(regression, indices)
-#         regression_target = gather_nd_torch(regression_target, indices)
+    def forward(self, y_pred, y_true):
+        """ Compute the smooth L1 loss of y_pred w.r.t. y_true.
+        Args:
+            regression(y_true): Tensor from the generator of shape (B, N, 5). The last value for each box is the state of the anchor (ignore, negative, positive).
+            anno(y_pred): Tensor from the network of shape (B, N, 4).
+        Returns:
+            The smooth L1 loss of y_pred w.r.t. y_true.
+        """
+        # separate target and state
+        regression = y_pred
+        regression_target = y_true[:, :, :-1]
+        anchor_state = y_true[:, :, -1]
 
-#         # compute smooth L1 loss
-#         # f(x) = 0.5 * (sigma * x)^2          if |x| < 1 / sigma / sigma
-#         #        |x| - 0.5 / sigma / sigma    otherwise
-#         regression_diff = regression - regression_target
-#         regression_diff = keras.backend.abs(regression_diff)
-#         regression_loss = tf.where(
-#             keras.backend.less(regression_diff, 1.0 / sigma_squared),
-#             0.5 * sigma_squared * keras.backend.pow(regression_diff, 2),
-#             regression_diff - 0.5 / sigma_squared
-#         )
+        # filter out "ignore" anchors
+        indices = torch.nonzero(torch.eq(anchor_state, 1))
+        regression = gather_nd_simple(regression, indices)
+        regression_target = gather_nd_simple(regression_target, indices)
 
-#         # compute the normalizer: the number of positive anchors
-#         normalizer = keras.backend.maximum(1, keras.backend.shape(indices)[0])
-#         normalizer = keras.backend.cast(normalizer, dtype=keras.backend.floatx())
-#         return keras.backend.sum(regression_loss) / normalizer
+        # compute smooth L1 loss
+        # f(x) = 0.5 * (sigma * x)^2          if |x| < 1 / sigma / sigma
+        #        |x| - 0.5 / sigma / sigma    otherwise
+        regression_diff = regression - regression_target
+        regression_diff = torch.abs(regression_diff)
+        regression_loss = torch.where(
+            torch.lt(regression_diff, 1.0 / self.sigma_squared),
+            0.5 * self.sigma_squared * torch.pow(regression_diff, 2),
+            regression_diff - 0.5 / self.sigma_squared
+        )
 
-#     return _smooth_l1
+        # compute the normalizer: the number of positive anchors
+        normalizer = np.maximum(1, indices.shape[0]).astype(np.float64)
+        return torch.sum(regression_loss).item() / normalizer
+
+
 
 class transformation_loss(nn.Module):
     """

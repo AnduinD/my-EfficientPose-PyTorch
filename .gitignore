@@ -134,6 +134,7 @@ weights/
 # training assets
 weights/*
 logs/*
+test_output/*
 
 .vscode/*
 benchmark/*
