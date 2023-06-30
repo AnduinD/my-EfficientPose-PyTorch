@@ -36,7 +36,7 @@ from backbone import EfficientPoseBackbone_WMSA
 from utils.utils import preprocess_pose, postprocess_pose, postprocess_pose_org, get_linemod_camera_matrix, get_linemod_3d_bboxes
 from utils.visualization import draw_detections
 
-
+from torch.profiler import profile, record_function, ProfilerActivity
 
 compound_coef = 0  # 耦合因子φ
 force_input_size = None  # set None to use default size
@@ -81,14 +81,14 @@ class ModelWithFilterDet(nn.Module):
 
 def main():
     #input parameter
-    path_to_images = "../datasets/Linemod_preprocessed/data/08/rgb/"
+    path_to_images = "../datasets/Linemod_preprocessed/data/01/rgb/"# path_to_images = "../datasets/Linemod_preprocessed/data/08/rgb/"
     image_extension = ".png"
     #path_to_weights = f'weights/trained/efficientpose-d{compound_coef}_linemod_obj8_one_last_train.pth'
-    path_to_weights = f'weights/trained_WMSA/obj_8/efficientpose-d{compound_coef}_linemod_obj8_one_last_train.pth'
+    path_to_weights = f'weights/trained_WMSA/obj_1/efficientpose-d{compound_coef}_linemod_obj1_one_best_train.pth'
     batch_size = 1
     save_path = "./predictions/linemod" #where to save the images or None if the images should be displayed and not saved
     #class_to_name = {0: "ape", 1: "can", 2: "cat", 3: "driller", 4: "duck", 5: "eggbox", 6: "glue", 7: "holepuncher"} #Occlusion
-    class_to_name = {0: "driller"} #Linemod use a single class with a name of the Linemod objects
+    class_to_name = {0: "ape"} #Linemod use a single class with a name of the Linemod objects
     
     translation_scale_norm = 1000.0
     draw_bbox_2d = True #False
@@ -175,8 +175,15 @@ def main():
             input_img_batch = input_img_batch.to(torch.float32 if not use_float16 
                                                  else torch.float16).permute(0,3,1,2)
             
-            # boxes, scores, labels, rotations, translations, anchors = model((input_imgs,input_cams)) 
-            boxes, scores, labels, rotations, translations = model((input_img_batch,input_cam_batch))
+            with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
+                         record_shapes=True, 
+                         profile_memory = True, 
+                         use_cuda=False) as prof:
+                with record_function("model_inference"):
+                    # boxes, scores, labels, rotations, translations, anchors = model((input_imgs,input_cams)) 
+                    boxes, scores, labels, rotations, translations = model((input_img_batch,input_cam_batch))
+
+            print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
 
             for idx_j in range(idx_i, idx_i+batch_size) :
                 #postprocessing

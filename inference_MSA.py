@@ -30,9 +30,9 @@ import torch.nn as nn
 from torch.backends import cudnn
 
 from efficientdet.model import FilterDetections
-from backbone import EfficientPoseBackbone, EfficientPoseBackbone_MSA
-from efficientdet.utils import BBoxTransform, ClipBoxes
-from utils.utils import STANDARD_COLORS, standard_to_bgr, get_index_label, plot_one_box,postprocess_det
+from backbone import EfficientPoseBackbone_WMSA
+#from efficientdet.utils import BBoxTransform, ClipBoxes
+#from utils.utils import STANDARD_COLORS, standard_to_bgr, get_index_label, plot_one_box,postprocess_det
 from utils.utils import preprocess_pose, postprocess_pose, postprocess_pose_org, get_linemod_camera_matrix, get_linemod_3d_bboxes
 from utils.visualization import draw_detections
 
@@ -42,12 +42,13 @@ compound_coef = 0  # 耦合因子φ
 force_input_size = None  # set None to use default size
 #img_path = 'test/img.png'
 
-# # replace this part with your project's anchor config
+# replace this part with your project's anchor config
 # anchor_ratios = [(1.0, 1.0), (1.4, 0.7), (0.7, 1.4)]
 # anchor_scales = [2**0, 2**(1.0/3.0), 2**(2.0/3.0)]
 
-score_threshold = 0.3
-iou_threshold = 0.2
+score_threshold = 0.01
+nms_threshold = 0.01
+# iou_threshold = 0.2
 
 use_cuda = True #False #
 use_float16 = False
@@ -62,20 +63,20 @@ class ModelWithFilterDet(nn.Module):
                                 num_rotation_parameters = 3,
                                 num_translation_parameters = 3,
                                 nms = True,
-                                class_specific_filter = True,
-                                nms_threshold = 0.5, 
-                                score_threshold = 0.1,
+                                class_specific_filter = False,#True,
+                                nms_threshold = nms_threshold, 
+                                score_threshold = score_threshold,
                                 max_detections = 100)
 
     def forward(self, inputs):
         features, regression, classification, translation, rotation, anchors, bboxes = self.model(inputs)
         classification = torch.sigmoid(classification)
         boxes, scores, labels, rotation, translation = self.filter_det([bboxes, classification, translation, rotation])
-        return  boxes.cpu().detach().numpy(), \
-                scores.cpu().detach().numpy(), \
-                labels.cpu().detach().numpy(), \
-                rotation.cpu().detach().numpy(), \
-                translation.cpu().detach().numpy()\
+        return  boxes.cpu().numpy(), \
+                scores.cpu().numpy(), \
+                labels.cpu().numpy(), \
+                rotation.cpu().numpy(), \
+                translation.cpu().numpy()\
 
 
 def main():
@@ -83,7 +84,7 @@ def main():
     path_to_images = "../datasets/Linemod_preprocessed/data/08/rgb/"
     image_extension = ".png"
     #path_to_weights = f'weights/trained/efficientpose-d{compound_coef}_linemod_obj8_one_last_train.pth'
-    path_to_weights = f'weights/trained/obj_8/efficientpose-d{compound_coef}_linemod_obj8_one_best_train.pth'
+    path_to_weights = f'weights/trained_MSA/obj_8/efficientpose-d{compound_coef}_linemod_obj8_one_best_train.pth'
     batch_size = 1
     save_path = "./predictions/linemod" #where to save the images or None if the images should be displayed and not saved
     #class_to_name = {0: "ape", 1: "can", 2: "cat", 3: "driller", 4: "duck", 5: "eggbox", 6: "glue", 7: "holepuncher"} #Occlusion
@@ -103,15 +104,17 @@ def main():
         print("Error: the given path to the images {} does not exist!".format(path_to_images))
         return
     
-    image_list = [filename for filename in os.listdir(path_to_images) if image_extension in filename] #[:10]
+    image_list = [filename for filename in os.listdir(path_to_images) if image_extension in filename][:100]
     print("\nInfo: found {} image files".format(len(image_list)))   
     
     #build model and load weights
-    model = EfficientPoseBackbone(compound_coef=compound_coef, 
-                                    num_classes=num_classes,
-                                    # ratios=anchor_ratios, 
-                                    # scales=anchor_scales)
-                                    )
+    model = EfficientPoseBackbone_WMSA(compound_coef=compound_coef, 
+                                        num_classes=num_classes,
+                                        num_anchors=9,
+                                        freeze_bn=True
+                                        #score_threshold = args.score_threshold,
+                                        #num_rotation_parameters = num_rotation_parameters)
+                                        )
     
     #print(model)
 

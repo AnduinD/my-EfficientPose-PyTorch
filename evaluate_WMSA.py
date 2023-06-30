@@ -64,7 +64,7 @@ def parse_args(args):
     parser.add_argument('--linemod_path', 
                         default='../datasets/Linemod_preprocessed', 
                         help = 'Path to dataset dir (ie. /Datasets/Linemod_preprocessed).')
-    parser.add_argument('--object-id', 
+    parser.add_argument('--object_id', 
                         type = int, default = 8, 
                         help = 'ID of the Linemod Object to train on')    
     # linemod_parser = subparsers.add_parser('linemod')
@@ -139,7 +139,7 @@ def main(args=None):
                                     num_classes = num_classes,
                                     num_anchors = num_anchors,
                                     freeze_bn = True,
-                                    score_threshold = args.score_threshold,
+                                    #score_threshold = args.score_threshold,
                                     num_rotation_parameters = num_rotation_parameters)
     print("Done!")
 

@@ -183,7 +183,7 @@ class ModelWithLoss(nn.Module):
         
         # return 1.0*smooth_l1_loss+0.06*transformation_loss, \
         #         cls_loss, smooth_l1_loss, transformation_loss
-        return 1.0*smooth_l1_loss+0.00*cls_loss+1.02*transformation_loss, \
+        return 2.0*smooth_l1_loss+0.00*cls_loss+0.02*transformation_loss, \
                 cls_loss, smooth_l1_loss, transformation_loss
 
 
@@ -284,9 +284,9 @@ def main(args = None):
             if use_sync_bn:
                 patch_replication_callback(model)
     
-    # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas = (0.9, 0.999))
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas = (0.9, 0.999))
     #optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum = 0.9)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas = (0.9, 0.999), amsgrad=False)
+    #optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas = (0.9, 0.999), amsgrad=False)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor = 0.5, verbose=True, eps=1e-10)
 
     epoch = 0

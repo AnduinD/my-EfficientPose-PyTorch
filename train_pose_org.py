@@ -21,31 +21,16 @@ def parse_args(args):
     """
     date_and_time = time.strftime("%d_%m_%Y_%H_%M_%S")
     parser = argparse.ArgumentParser(description = 'Simple EfficientPose training script.')
-    #subparsers = parser.add_subparsers(help = 'Arguments for specific dataset types.', dest = 'dataset_type')
-    #subparsers.required = True
 
     parser.add_argument('--dataset_type', 
                         default = 'linemod', 
                         help = 'Arguments for specific dataset types.')    
-    # linemod_parser = subparsers.add_parser('linemod')
-    # linemod_parser.add_argument('linemod_path', 
-    #                             default='../datasets/Linemod_preprocessed', 
-    #                             help = 'Path to dataset dir (ie. /Datasets/Linemod_preprocessed).')
-    # linemod_parser.add_argument('--object-id', 
-    #                             type = int, default = 8, 
-    #                             help = 'ID of the Linemod Object to train on')
     parser.add_argument('--linemod_path', 
                         default='../datasets/Linemod_preprocessed', 
                         help = 'Path to dataset dir (ie. /Datasets/Linemod_preprocessed).')
     parser.add_argument('--object-id', 
                         type = int, default = 8, 
                         help = 'ID of the Linemod Object to train on')    
-
-
-    # occlusion_parser = subparsers.add_parser('occlusion')
-    # occlusion_parser.add_argument('occlusion_path',  
-    #                               default='../datasets/Linemod_preprocessed',
-    #                               help = 'Path to dataset dir (ie. /Datasets/Linemod_preprocessed).')
 
     parser.add_argument('--weights',
                         #default= 'imagenet',
@@ -99,9 +84,6 @@ def parse_args(args):
     parser.add_argument('--epochs', 
                         help = 'Number of epochs to train.', 
                         default = 500, type = int)
-    # parser.add_argument('--steps', 
-    #                     help = 'Number of steps per epoch.', 
-    #                     type = int, default = int(179 * 10))
 
     # parser.add_argument('--snapshot_path', 
     #                     help = 'Path to store snapshots of models during training', 
